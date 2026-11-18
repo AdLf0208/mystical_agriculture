@@ -1,0 +1,40 @@
+# Mystical Agriculture for Horizon — slice 1: the inferium crop/essence loop.
+# One flat package: this manifest is the mod's only identity, `src/` is compiled by the
+# launcher against the game build [native] pins, and `assets/` + `data/` are the carried
+# content (the crop, its seeds, essence and ingots, their models, textures, recipes, loot).
+id = "mysticalagriculture"
+name = "Mystical Agriculture"
+# 0.2.0 is the SDK-format version. It supersedes the retired `.hnmod` 0.1.0 (PR #886,
+# closed by the 2026-11-18 format purge because Horizon retired `.hnmod`); the registry
+# entry, the file name and the release must agree.
+version = "0.2.0"
+description = """A port of Mystical Agriculture for Horizon: the inferium crop and the essence loop
+around it. Inferium seeds plant mysticalagriculture:inferium_crop on farmland, it grows through
+the wheat template's ages 0..7 on random ticks, and a harvest drops the jar's own essence and
+seeds — one seed below age 7, and at age 7 the tier's essence plus a farmland-dependent second
+seed — from the block under it rather than the rolled table. Bone meal is spent and refused on
+every Mystical Agriculture crop, as upstream. The two recipes (seeds from 8 essence and a wheat
+seed, an inferium ingot from a prosperity ingot and 2 essence) are carried with the crop's
+assets. Tiers 2–5, the essence farmlands, the ~120 other crops, the machines (infuser,
+reprocessor, seed reprocessor, growth accelerators), tools, armour and mob souls are recorded
+gaps."""
+authors = ["BlakeBr0", "AdLf0208"]
+# MIT, read from the jar's META-INF/neoforge.mods.toml and the upstream LICENSE; rank 0.
+# Local-only until the campaign maintainer approves publishing (ARCHITECTURE.md §8).
+# A native mod: Rust in src/, compiled by the launcher against the build [native] pins,
+# beside the carried assets/ and data/. The id is the resource namespace and the only
+# identity: Cargo's package name and version are not the mod's.
+api = "0.2"
+# The installation side, not the hook's: the crop and its drops are server behaviour, and an
+# integrated server belongs to the client installation, so "both" keeps single player and a
+# LAN host working.
+side = "both"
+# The one shared value every manifest carries ("May add blocks, items, mob effects and entity
+# types to your worlds"): this mod declares one block and four items. It is a schema
+# requirement, not a claim that a mod without content may drop it.
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
