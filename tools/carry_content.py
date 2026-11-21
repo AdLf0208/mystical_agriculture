@@ -110,27 +110,34 @@ INFERIUM_INGOT_RECIPE = {
 # The jar's getDrops for a crop on plain farmland: one seed at every age, and
 # one essence plus one seed at age 7. The native half replaces this with the
 # farmland-aware formula (the table is the content-only fallback).
+#
+# **26.3's dialect**, not 1.21.1's (the defect this slice fixes): the ripe crop is
+# a singular `"condition": {"type": "minecraft:match_block", …}` — on the item
+# entry and on the pool — where 1.21.1 wrote an array of `block_state_property`,
+# and a pool has no `bonus_rolls` and spells its integral roll `1`. Compare
+# `data/minecraft/loot_table/blocks/wheat.json` (the crop) and
+# `acacia_button.json` (the pool) in the prepared 26.3 resources; with the old
+# array form the block dropped nothing at all. `tools/data_shape.py` is the check.
+RIPE = {
+    "type": "minecraft:match_block",
+    "blocks": f"{MOD}:inferium_crop",
+    "state": {"age": "7"},
+}
+
 CROP_LOOT = {
     "type": "minecraft:block",
     "random_sequence": f"{MOD}:blocks/inferium_crop",
     "pools": [
         {
-            "rolls": 1.0,
-            "bonus_rolls": 0.0,
+            "rolls": 1,
             "entries": [
                 {
                     "type": "minecraft:alternatives",
                     "children": [
                         {
                             "type": "minecraft:item",
+                            "condition": RIPE,
                             "name": f"{MOD}:inferium_essence",
-                            "conditions": [
-                                {
-                                    "type": "minecraft:block_state_property",
-                                    "block": f"{MOD}:inferium_crop",
-                                    "properties": {"age": "7"},
-                                }
-                            ],
                         },
                         {"type": "minecraft:item", "name": f"{MOD}:inferium_seeds"},
                     ],
@@ -138,15 +145,8 @@ CROP_LOOT = {
             ],
         },
         {
-            "rolls": 1.0,
-            "bonus_rolls": 0.0,
-            "conditions": [
-                {
-                    "type": "minecraft:block_state_property",
-                    "block": f"{MOD}:inferium_crop",
-                    "properties": {"age": "7"},
-                }
-            ],
+            "rolls": 1,
+            "condition": RIPE,
             "entries": [{"type": "minecraft:item", "name": f"{MOD}:inferium_seeds"}],
         },
     ],

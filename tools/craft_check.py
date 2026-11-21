@@ -81,7 +81,7 @@ def main():
 
     failures = []
 
-    def check(label, items, placements, want_item, want_count, take=False):
+    def check(label, items, placements, want_item, want_count, take=False, consumed=()):
         setup(items)
         for item, targets in placements:
             place(item, targets)
@@ -95,10 +95,16 @@ def main():
             wait(5)
             run("click-slot", "9")
             wait(3)
-            made = run("inventory")["counts"].get(want_item, 0)
+            counts = run("inventory")["counts"]
+            made = counts.get(want_item, 0)
             if made < want_count:
                 failures.append(
                     f"{label}: the crafted stack reached the inventory as {made}")
+            # The parity rule asks that the ingredients were consumed, not just that
+            # the product appeared: every one is given exactly its recipe amount.
+            leftover = {item: counts.get(item, 0) for item in consumed if counts.get(item, 0)}
+            if leftover:
+                failures.append(f"{label}: ingredients left over {leftover}")
 
     def empty_control(label, items, placements):
         setup(items)
@@ -120,6 +126,7 @@ def main():
         "mysticalagriculture:inferium_seeds",
         1,
         take=True,
+        consumed=("mysticalagriculture:inferium_essence", "minecraft:wheat_seeds"),
     )
     empty_control(
         "8 essence + 1 stick -> nothing",
@@ -140,6 +147,8 @@ def main():
         "mysticalagriculture:inferium_ingot",
         1,
         take=True,
+        consumed=("mysticalagriculture:prosperity_ingot",
+                  "mysticalagriculture:inferium_essence"),
     )
     empty_control(
         "1 prosperity ingot + 2 wheat seeds -> nothing",

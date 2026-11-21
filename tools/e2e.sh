@@ -28,9 +28,24 @@
 # STOCK=<unmodified horizon-client>: first run the same scenario checks against a
 # game with no mod, where every id must be unknown — the counterfactual that
 # proves the ids came from this package (optional; skipped when unset).
+#
+# TABLE=1 is the carried loot table's own leg, and it needs the code to be
+# **absent** (the mod's `loot_drops` hook replaces the rolled table for this
+# crop, so a native game can never exercise it). The pin refuses a native
+# package as a content candidate — `horizon-mod-package/src/selection.rs`:
+# "Native packages are not content candidates, even through a development path"
+# — so this leg mounts a content-only *copy* of the package (the same
+# `assets/`/`data/` bytes, `[native]` dropped) as `--dev-mod` on the unmodded
+# game (`CONTROL_GAME`, from `launcher-game.sh env`). It then breaks a ripe and
+# a young crop and asserts the table's own drops. `SOURCE=` names the package
+# copied (default `$PORT/mysticalagriculture.hmod`); pointing it at the previous
+# package is the counterfactual: the 1.21.1 table drops nothing, so the leg must
+# FAIL.
 set -Eeuo pipefail
 
 SELFTEST=${SELFTEST:-0}
+TABLE=${TABLE:-0}
+DEV_MOD=${DEV_MOD:-}
 
 CLONE=/home/adlf/Desktop/all_the_mods_10_rust_rewrite
 PORT=$CLONE/ports/mysticalagriculture
@@ -119,9 +134,11 @@ trap cleanup EXIT
 launch() { # launch [WORLD]
     local world=${1:-$WORLD}
     rm -f "$SOCK"
-    # No `--dev-mod`: a native `.hmod` is compiled in by the launcher's native build.
+    # No `--dev-mod` for a native `.hmod`: it is compiled in by the launcher's native
+    # build. The table leg sets DEV_MOD to a content-only copy.
     local args=(--game "$GAME" --world "$world" --seed 20261108 --creative --offscreen --wait
                 --game-dir "$SCRATCH/game" --resources "$RES" --render-distance 4)
+    [ -z "$DEV_MOD" ] || args+=(--dev-mod "$DEV_MOD")
     "$CTL" --socket "$SOCK" launch "${args[@]}"
     ctl wait-ready 180
     if ctl logs --lines 4000 2>/dev/null | grep -q "content mods not loaded"; then
@@ -191,6 +208,130 @@ stock_leg() {
     rm -f "$SOCK"
 }
 
+
+# A content-only copy of a package: the same `assets/`/`data/` bytes with `[native]`
+# removed from the manifest. The pin refuses a native package as a content candidate
+# (`horizon-mod-package/src/selection.rs`: "Native packages are not content candidates,
+# even through a development path"), so this copy is how the carried loot table is
+# rolled with the mod's code absent. `tree` (the port) is compared file by file, so the
+# leg's claim is about the delivered bytes and not about a hand-edited copy.
+stage_content_only() { # source(.hmod|dir) dest [tree]
+    local source=$1 dest=$2 tree=${3:-}
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    python3 - "$source" "$dest" "$tree" <<'PY' || fail "cannot stage a content-only copy of $source"
+import hashlib, sys, zipfile
+from pathlib import Path
+
+source, dest, tree = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+if source.is_dir():
+    def read(name: str) -> bytes:
+        return (source / name).read_bytes()
+    names = sorted(p.relative_to(source).as_posix() for p in source.rglob("*")
+                   if p.is_file()
+                   and p.relative_to(source).as_posix().split("/")[0] in ("assets", "data"))
+else:
+    archive = zipfile.ZipFile(source)
+    names = sorted(n for n in archive.namelist()
+                   if not n.endswith("/") and n.split("/")[0] in ("assets", "data"))
+
+    def read(name: str) -> bytes:
+        return archive.read(name)
+
+text = read("horizon-mod.toml").decode()
+head, sep, _native = text.partition("\n[native]")
+if not sep:
+    raise SystemExit(f"{source}: no [native] block to drop")
+(dest / "horizon-mod.toml").write_text(head.rstrip("\n") + "\n")
+digest = hashlib.sha256()
+tree_digest = hashlib.sha256()
+for name in names:
+    data = read(name)
+    (dest / name).parent.mkdir(parents=True, exist_ok=True)
+    (dest / name).write_bytes(data)
+    digest.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
+    if tree:
+        tree_file = Path(tree) / name
+        if not tree_file.is_file() or tree_file.read_bytes() != data:
+            raise SystemExit(f"{name}: the package's bytes differ from {tree_file}")
+        tree_digest.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
+print(f"content-only copy of {source}: {len(names)} file(s), data sha256 {digest.hexdigest()}")
+if tree:
+    print(f"  the tree's data/ is the same {len(names)} file(s): sha256 {tree_digest.hexdigest()}")
+PY
+}
+
+# TABLE=1: break a ripe and a young crop on the unmodded game with the package's data
+# mounted as content, and assert the table's own drops. The mod's `loot_drops` hook is
+# absent here (no code), which is the only way the rolled table is reachable.
+break_crop() { # x z — clears the hand, holds the hoe, stands on the crop and mines it
+    ctl command "clear @s" >/dev/null
+    ctl give minecraft:iron_hoe 1 >/dev/null || fail "give hoe"
+    ctl wait 3 >/dev/null
+    ctl select minecraft:iron_hoe >/dev/null
+    ctl tp "$1.5" 121 "$2.5" >/dev/null
+    ctl wait 4 >/dev/null
+    ctl break "$1" 121 "$2"
+}
+
+table_leg() {
+    local ripe ripe_seeds young young_seeds wheat_item broken
+    say "launch (unmodded game, the package's data as --dev-mod: the table is what rolls)"
+    launch MysticalAgricultureTable
+    arena
+    ctl command "gamemode survival @s" >/dev/null
+    ctl setblock 42 121 3 "$CROP[age=7]" >/dev/null || fail "setblock ripe crop"
+    ctl setblock 44 121 5 "$CROP[age=0]" >/dev/null || fail "setblock young crop"
+    ctl wait 6
+    [ "$(block_name 42 121 3)" = "$CROP" ] || fail "the table leg's ripe crop did not place"
+    [ "$(block_name 44 121 5)" = "$CROP" ] || fail "the table leg's young crop did not place"
+    broken=$(break_crop 42 3) || fail "cannot break the ripe crop"
+    echo "$broken" | jq -c '{scenario:"table age=7",block,block_before,drops}'
+    ripe=$(echo "$broken" | jq -r --arg i "$ESSENCE" '.drops[$i] // 0')
+    ripe_seeds=$(echo "$broken" | jq -r --arg i "$SEEDS" '.drops[$i] // 0')
+    if [ "$SELFTEST" = 1 ]; then
+        echo "(selftest: asserting the table's age-7 crop dropped no essence)"
+        [ "$ripe" = 0 ] || fail "the table's age-7 crop dropped $ripe essence (selftest expects 0)"
+    else
+        [ "$ripe" -ge 1 ] || fail "the table's age-7 crop dropped $ripe essence"
+    fi
+    [ "$ripe_seeds" -ge 1 ] || fail "the table's age-7 crop dropped $ripe_seeds seeds"
+    broken=$(break_crop 44 5) || fail "cannot break the young crop"
+    echo "$broken" | jq -c '{scenario:"table age=0",block,block_before,drops}'
+    young=$(echo "$broken" | jq -r --arg i "$ESSENCE" '.drops[$i] // 0')
+    young_seeds=$(echo "$broken" | jq -r --arg i "$SEEDS" '.drops[$i] // 0')
+    [ "$young" = 0 ] || fail "the table's age-0 crop dropped $young essence, expected 0"
+    [ "$young_seeds" -ge 1 ] || fail "the table's age-0 crop dropped $young_seeds seeds"
+    # The differential: vanilla wheat's own table rolls 1 item beside ours.
+    ctl setblock 45 121 5 "minecraft:wheat[age=7]" >/dev/null || fail "setblock wheat control"
+    ctl wait 6
+    broken=$(break_crop 45 5) || fail "cannot break the wheat control"
+    echo "$broken" | jq -c '{scenario:"table wheat age=7",block,block_before,drops}'
+    wheat_item=$(echo "$broken" | jq -r '.drops["minecraft:wheat"] // 0')
+    [ "$wheat_item" -ge 1 ] || fail "the vanilla wheat control dropped $wheat_item wheat"
+    ctl command "gamemode creative @s" >/dev/null
+    echo "PASS: the carried table rolled by itself — age 7 -> $ripe essence + $ripe_seeds seeds, age 0 -> $young essence + $young_seeds seeds, and vanilla wheat beside it dropped $wheat_item wheat"
+}
+
+
+if [ "$TABLE" = 1 ]; then
+    [ -n "${CONTROL_GAME:-}" ] \
+        || fail "TABLE=1 needs CONTROL_GAME: an unmodded Nightly (launcher-game.sh env prints it)"
+    [ -x "$CONTROL_GAME" ] || fail "CONTROL_GAME is not executable: $CONTROL_GAME"
+    GAME=$CONTROL_GAME
+    SOURCE=${SOURCE:-$PORT/$MOD.hmod}
+    [ -f "$SOURCE" ] || fail "no package at $SOURCE"
+    sha256sum "$SOURCE"
+    if [ "$SOURCE" = "$PORT/$MOD.hmod" ]; then
+        stage_content_only "$SOURCE" "$SCRATCH/content" "$PORT"
+    else
+        echo "(counterfactual: not the delivered package, so its bytes are not compared to the tree)"
+        stage_content_only "$SOURCE" "$SCRATCH/content"
+    fi
+    DEV_MOD=$SCRATCH/content
+    table_leg
+    exit 0
+fi
 
 # --------------------------------------------------------------- launch
 say "launch (offscreen renderer, The End, a launcher-built game carrying the package)"
@@ -316,15 +457,6 @@ echo "wheat control PASS: bone meal grew vanilla wheat to age $wheat"
 # ---------------------------------------------------------------- harvest
 say "a survival break drops the jar's loot: ripe = essence + seed, young = seed only"
 ctl command "gamemode survival @s" >/dev/null
-break_crop() { # x z
-    ctl command "clear @s" >/dev/null
-    ctl give minecraft:iron_hoe 1 >/dev/null || fail "give hoe"
-    ctl wait 3 >/dev/null
-    ctl select minecraft:iron_hoe >/dev/null
-    ctl tp "$1.5" 121 "$2.5" >/dev/null
-    ctl wait 4 >/dev/null
-    ctl break "$1" 121 "$2"
-}
 ctl setblock 42 121 3 "$CROP[age=7]" >/dev/null || fail "setblock ripe crop"
 ctl setblock 44 121 5 "$CROP[age=0]" >/dev/null || fail "setblock young crop"
 ctl wait 6

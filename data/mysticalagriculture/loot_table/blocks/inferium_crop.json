@@ -3,24 +3,21 @@
   "random_sequence": "mysticalagriculture:blocks/inferium_crop",
   "pools": [
     {
-      "rolls": 1.0,
-      "bonus_rolls": 0.0,
+      "rolls": 1,
       "entries": [
         {
           "type": "minecraft:alternatives",
           "children": [
             {
               "type": "minecraft:item",
-              "name": "mysticalagriculture:inferium_essence",
-              "conditions": [
-                {
-                  "type": "minecraft:block_state_property",
-                  "block": "mysticalagriculture:inferium_crop",
-                  "properties": {
-                    "age": "7"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "mysticalagriculture:inferium_crop",
+                "state": {
+                  "age": "7"
                 }
-              ]
+              },
+              "name": "mysticalagriculture:inferium_essence"
             },
             {
               "type": "minecraft:item",
@@ -31,17 +28,14 @@
       ]
     },
     {
-      "rolls": 1.0,
-      "bonus_rolls": 0.0,
-      "conditions": [
-        {
-          "type": "minecraft:block_state_property",
-          "block": "mysticalagriculture:inferium_crop",
-          "properties": {
-            "age": "7"
-          }
+      "rolls": 1,
+      "condition": {
+        "type": "minecraft:match_block",
+        "blocks": "mysticalagriculture:inferium_crop",
+        "state": {
+          "age": "7"
         }
-      ],
+      },
       "entries": [
         {
           "type": "minecraft:item",

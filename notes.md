@@ -110,15 +110,164 @@ The rules (age/ripeness, the farmland tiers, the draw order) stay in
   worldgen, Patchouli guide, config, Jade/Curios integrations.
 - No creative tab, no villager planting, no block-colour tint registration for
   the mature flower (the model's `tintindex` gets no mod colour).
-- **The in-game e2e has not been re-run in the SDK format**: it needs a
-  launcher-built game (`horizon-launcher native-build … --trust-native-code`)
-  and `horizon-launcher` is not installed here. `tools/e2e.sh` is adapted to
-  that shape (no `--dev-mod`, `GAME=` required, an optional `STOCK=` control)
-  and its assertions are unchanged; the 0.1.0 run below stands as the
-  behaviour's evidence.
+- ~~**The in-game e2e has not been re-run in the SDK format**~~ — **closed in slice 2**: the
+  launcher-built game at `0a875da` runs `tools/e2e.sh` (`PASS` + `EXIT:0`, `SELFTEST=1`
+  `EXIT:1`), see §Slice 2. `horizon-launcher` is not on `PATH`; the campaign's
+  `ports/tools/launcher-game.sh` installs 0.2.92 and builds/exports the game for the pin.
 - The drop hook **replaces** the rolled list, so a third mod's addition to the
   same crop's drops (a loot modifier) is dropped too — the retired hook did the
   same and the jar has no such interaction to copy.
+
+## Slice 2 — the carried loot table in 26.3's dialect, and the first SDK in-game leg
+
+*Slice 2 of the port, version **0.2.1**, SDK nightly **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`**
+(the campaign pin; 0.2.0 was built at `0b14f8a`), mixins `e59da9094f0c…`, game 26.3.*
+
+**Why this slice.** Two lines drove it. The gap list said *"The in-game e2e has not been
+re-run in the SDK format"*, and the 2026-11-20 parity ruling says *"every loot table /
+tag / worldgen family is exercised"* — the carried `inferium_crop` table had never been
+rolled in game, and it was written in 1.21.1's spelling: `"conditions": [ {…} ]` arrays
+and `minecraft:block_state_property`. Nothing was invented: the family is the table the
+jar's `getDrops` fallback already describes (`FINDINGS.md`), and it is content + a
+harness, not a new machine — inside the tier.
+
+### The red proof (data-dialect test, before the fix)
+
+`tools/data_shape.py` is the family's unit test: it reads every carried recipe and loot
+table and refuses 1.21.1's dialect. Against the shipped 0.2.0 tree
+(`ports/_shared/evidence/mysticalagriculture/loot-red.log`, exit 1):
+
+```
+  ok   data/mysticalagriculture/recipe/inferium_ingot.json: crafting_shapeless, bare item/tag strings
+  ok   data/mysticalagriculture/recipe/inferium_seeds.json: crafting_shaped, bare item/tag strings
+  FAIL data/mysticalagriculture/loot_table/blocks/inferium_crop.json: 1.21.1 loot table — pool 0: "bonus_rolls": 0.0 (26.3 has no such key)
+  FAIL data/mysticalagriculture/loot_table/blocks/inferium_crop.json: 1.21.1 loot table — pool 0: "rolls": 1.0 (26.3 spells an integral roll 1)
+  FAIL data/mysticalagriculture/loot_table/blocks/inferium_crop.json: 1.21.1 loot table — pool 0.entries[0].children[0]: "conditions": [{"type": "minecraft:block_state_property", "block": "mysticalagriculture:inferium_crop", "properties": {"age": "7"}}] (26.3 uses "condition": {...})
+  FAIL data/mysticalagriculture/loot_table/blocks/inferium_crop.json: 1.21.1 loot table — pool 1: "conditions": [{"type": "minecraft:block_state_property", "block": "mysticalagriculture:inferium_crop", "properties": {"age": "7"}}] (26.3 uses "condition": {...})
+  FAIL data/mysticalagriculture/loot_table/blocks/inferium_crop.json: 1.21.1 loot table — pool 1: "bonus_rolls": 0.0 (26.3 has no such key)
+  FAIL data/mysticalagriculture/loot_table/blocks/inferium_crop.json: 1.21.1 loot table — pool 1: "rolls": 1.0 (26.3 spells an integral roll 1)
+data shape: 3 file(s) checked, 6 1.21.1 problem(s); the shape to copy is data/minecraft/loot_table/blocks/{acacia_button,wheat}.json in the prepared 26.3 resources
+```
+
+### The fix, and what 26.3's own tables say
+
+`tools/carry_content.py`'s `CROP_LOOT` (the generator, so `--check` stays honest) now
+emits the shape the prepared 26.3 resources use for all 1201 block tables, read from
+`data/minecraft/loot_table/blocks/wheat.json` (the crop) and `acacia_button.json`
+(a pool): a singular `"condition": {"type": "minecraft:match_block", "blocks": …,
+"state": {"age": "7"}}` on the item entry and on the pool, no `bonus_rolls`, and an
+integral `rolls: 1`. The sibling `ports/mysticalagradditions` uses the same shape for its
+seven crops, and `horizon/docs/modpacks.md` §4 ("Loot registered in code") is the ruling:
+a table carried for a code-registered drop is written **in 26.3's shape**, with vanilla's
+`match_block` condition for a state-dependent entry. Green run (`loot-green.log`, exit 0),
+and the carry still matches the jar
+(`carry_content.py --check` → `40 files, 0 pending`, jar sha1 `4a774506…`):
+
+```
+  ok   data/mysticalagriculture/loot_table/blocks/inferium_crop.json: 26.3 loot table (singular condition, match_block, rolls 1)
+  ok   data/mysticalagriculture/recipe/inferium_ingot.json: crafting_shapeless, bare item/tag strings
+  ok   data/mysticalagriculture/recipe/inferium_seeds.json: crafting_shaped, bare item/tag strings
+data shape: 3 recipe/loot file(s), every one in the 26.3 dialect
+```
+
+### The reported 0-drop did **not** reproduce at this pin (measured, not assumed)
+
+The slice was briefed with a confirmed defect: *"`inferium_crop.json` uses the 1.21.1
+array form … so that block/crop drops nothing"*. The data was converted, but the symptom
+does not hold at `0a875da`, and the port records the measurement instead of repeating the
+claim: **the legacy spelling still rolls correctly in this pin's own game.** The evidence
+is `e2e-table-legacy-dialect.log` — the *published 0.2.0 package's* bytes
+(sha256 `0d6c7606…caee`, data digest `60ea27b5…`), mounted content-only and broken in game:
+
+```
+{"scenario":"table age=7","block":"minecraft:air","block_before":"mysticalagriculture:inferium_crop[age=7]","drops":{"mysticalagriculture:inferium_essence":1,"mysticalagriculture:inferium_seeds":1}}
+{"scenario":"table age=0","block":"minecraft:air","block_before":"mysticalagriculture:inferium_crop[age=0]","drops":{"mysticalagriculture:inferium_seeds":1}}
+```
+
+So at this pin the loot roller accepts `"conditions"` arrays and
+`block_state_property` — measured in the pin's own game above, and matching the
+campaign tree's reader (`crates/horizon-items/src/items.rs`, the `LootTable::conditions`
+helper, which reads both `condition` and `conditions`). The conversion is therefore
+**dialect parity with 26.3's own data**, not a behaviour repair: the table rolled 1
+essence + 1 seed before and after. Whatever dropped 0 for `modularrouters` is not this
+file's spelling; a table that carries a different key or a mod-kind condition is the
+likelier cause and belongs to that port's evidence. The data-shape check stays in the
+port so a future carry cannot reintroduce the 1.21.1 spelling unnoticed.
+
+### How the table is rolled in game at all
+
+A native package's `loot_drops` hook replaces the crop's rolled drops, and the pin
+refuses a native package as a content candidate —
+`horizon-mod-package/src/selection.rs`:
+
+> Native packages are not content candidates, even through a development path: their
+> canonical source and compiled identity are owned by the engine.
+
+So the table can only be exercised with the code absent. `tools/e2e.sh`'s `TABLE=1` leg
+stages a **content-only copy** of the delivered `.hmod` (`assets/` + `data/` verbatim,
+`[native]` cut from the manifest) and mounts it with `--dev-mod` on the unmodded Nightly
+(`CONTROL_GAME`). The staging compares every copied file with the tree's, so the claim is
+about the delivered bytes:
+
+```
+bdb1fb31d9b6d5db40e8057626cfdd0541b01418ef7345be33badbce432e38d1  …/mysticalagriculture.hmod
+content-only copy of …: 40 file(s), data sha256 2d205bd32caf5f93f43571fd93b86f20cbfed86c5d5178ec4c8cedfde699ed32
+  the tree's data/ is the same 40 file(s): sha256 2d205bd32caf5f93f43571fd93b86f20cbfed86c5d5178ec4c8cedfde699ed32
+```
+
+### The legs (0.2.1, pin `0a875da`)
+
+| Leg | Log | Result |
+|---|---|---|
+| native (the package compiled in) | `mysticalagriculture-e2e/e2e-default.log` | `PASS` + `EXIT:0` |
+| native, `SELFTEST=1` (must fail) | `e2e-selftest.log` | `FAIL: the age-7 crop dropped 1 essence (selftest expects 0)` + `EXIT:1` |
+| carried table, code absent (`TABLE=1`) | `e2e-table.log` | `PASS` + `EXIT:0` |
+| carried table, `SELFTEST=1` (must fail) | `e2e-table-selftest.log` | `FAIL: the table's age-7 crop dropped 1 essence (selftest expects 0)` + `EXIT:1` |
+| legacy dialect (the 0.2.0 package's bytes) | `e2e-table-legacy-dialect.log` | `PASS` + `EXIT:0` — the finding above |
+
+Native transcript, 0.2.1 at `0a875da`:
+
+```
+crop PASS: ages 0..7 read back
+seed planting PASS: inferium_crop[age=0] placed; a stick places nothing
+control PASS: random_tick_speed 0 keeps ages 0 and 3 for 300 ticks
+growth PASS after 20 ticks: age 0->3 and age 3->4
+our crop PASS: age 0 after bone meal, meal 8 -> 7
+wheat control PASS: bone meal grew vanilla wheat to age 5
+{"scenario":"age=7","block":"minecraft:air","block_before":"mysticalagriculture:inferium_crop[age=7]","drops":{"mysticalagriculture:inferium_essence":1,"mysticalagriculture:inferium_seeds":1}}
+{"scenario":"age=0","block":"minecraft:air","block_before":"mysticalagriculture:inferium_crop[age=0]","drops":{"mysticalagriculture:inferium_seeds":1}}
+{"scenario":"wheat age=7","block":"minecraft:air","block_before":"minecraft:wheat[age=7]","drops":{"minecraft:wheat":1,"minecraft:wheat_seeds":3}}
+loot PASS: age 7 -> 1 essence + 1 seeds; age 0 -> 0 essence + 1 seeds; wheat -> 1
+8 essence + 1 wheat seed -> inferium_seeds -> {"count": 1, "item": "mysticalagriculture:inferium_seeds", "slot": 200}
+8 essence + 1 stick -> nothing -> null
+1 prosperity ingot + 2 essence -> inferium_ingot -> {"count": 1, "item": "mysticalagriculture:inferium_ingot", "slot": 200}
+1 prosperity ingot + 2 wheat seeds -> nothing -> null
+recipe PASS: inferium_seeds (shaped) and inferium_ingot (shapeless); wrong-ingredient controls stay empty
+unknown ids refused
+PASS: …
+EXIT:0
+```
+
+The recipe assertion now also proves the **ingredients were consumed** (the parity rule's
+other half): `craft_check.py` gives exactly the recipe's amounts and, after taking the
+product, fails on any leftover of `consumed=()`.
+
+### Coverage (this slice's families)
+
+| Family | Status |
+|---|---|
+| crop block, ages 0..7 | tested — native leg, registry phase (setblock + read-back) |
+| seeds item places the crop | tested — planting phase, plus the stick control |
+| random-tick growth | tested — growth phase (`random_tick_speed 0` holds, 400 advances) |
+| bone-meal refusal | tested — bone-meal phase + vanilla wheat differential |
+| harvest drops via the hook | tested — harvest phase, ripe/young/vanilla |
+| **the carried loot table, code absent** | tested — `TABLE=1` leg + its `SELFTEST=1` |
+| the two recipes, output + consumption | tested — craft_check output, inventory take, no leftover |
+| every block/item id round-trips; unknown ids refused | tested — controls phase |
+| tiers 2–5, essence farmland, cruxes, ~120 crops | not ported — next slices (gap list above) |
+| machines (infuser, reprocessor, growth accelerators, soul jars) | not ported — tier `machines` work not started |
+| tools/armour, infusion, mob souls, ore worldgen, Patchouli, config | not ported |
+| creative tab, villager planting, flower block tint | not ported — content/client follow-ups |
 
 ## Migration to the SDK format
 
@@ -186,7 +335,7 @@ cargo fmt --check                                          # not `--all`
 rm -f Cargo.lock                                           # trap 5
 CARGO_INCREMENTAL=0 cargo horizon-mod build                 # -> target/horizon-mod/<id>.hmod
 cp target/horizon-mod/<id>.hmod ./<id>.hmod
-cargo horizon-mod check <id>.hmod [--uses|--json]
+cargo horizon-mod check <id>.hmod [--json]
 cargo horizon-mod fits <id>.hmod --build nightly
 sha256sum <id>.hmod
 ```
@@ -270,28 +419,56 @@ the archived one).
 
 ## Verification
 
-Pins: SDK nightly `0b14f8acfd97fa2c750e42795249dcc981178ca4`, mixins
-`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`, game 26.3. Every step ran directly
-in the port with `CARGO_INCREMENTAL=0` (no `build-slot.sh`: it speaks the retired
-ladder). Evidence: [`../_shared/evidence/mysticalagriculture/`](../_shared/evidence/mysticalagriculture/)
-(`sdk-*.log`, `sdk-uses.json`, `sdk-sha256.txt`, plus the 0.1.0 logs).
+Slice 2 (version **0.2.1**) was verified at the campaign pin — SDK nightly
+`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`, mixins
+`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`, game 26.3 — with every cargo step run
+through `ports/tools/build-slot.sh run --job W1-mysticalagriculture --step …`
+(`CARGO_INCREMENTAL=0`, no `--target-dir`) and every in-game leg through
+`ports/tools/launcher-game.sh`'s exported game. The 0.2.0 rows that follow the
+table are the migration's own record (pin `0b14f8a`); the 0.2.1 values are in it.
+Evidence: [`../_shared/evidence/mysticalagriculture/`](../_shared/evidence/mysticalagriculture/)
+(`sdk-*.log`, `sdk-uses.json`, `sdk-sha256.txt`, `loot-red/green.log`) and
+[`../_shared/evidence/mysticalagriculture-e2e/`](../_shared/evidence/mysticalagriculture-e2e/)
+(`e2e-default`, `e2e-selftest`, `e2e-table`, `e2e-table-selftest`,
+`e2e-table-legacy-dialect`, `launcher-build`).
 
 | Check | Command | Result |
 |---|---|---|
 | Runtime unit tests | `cargo test` | **9 passed**, 0 failed (`sdk-test.log`) |
 | Lints | `cargo clippy --all-targets -- -D warnings` | exit 0, **0 warnings** (`sdk-clippy.log`) |
 | Formatting | `cargo fmt --check` | clean (`sdk-fmt.log`) |
-| Package | `cargo horizon-mod build` | `target/horizon-mod/mysticalagriculture.hmod`, EXIT 0 (`sdk-build.log`) |
-| Registry check | `cargo horizon-mod check mysticalagriculture.hmod` | `mysticalagriculture 0.2.0 (native-mod, format native-1/0b14f8a…/e59da90…, for 26.3)`, **30,169 B**, sha256 `0d6c7606…caee`, **EXIT 0** (`sdk-check.log`, `sdk-check-json.log`) |
-| What it uses | `cargo horizon-mod check … --uses` | **110** surface entries (`sdk-uses.json`), EXIT 0 |
-| Fits the pinned build | `cargo horizon-mod fits … --build nightly` | `0b14f8a  made for`, EXIT 0 (`sdk-fits.log`) |
-| `runtime.rs` untouched | `unzip -p …hmod src/runtime.rs \| sha256sum` | `555e6442…f6b9` = the retired file, byte for byte (`cmp` too) |
-| Carried content | `python3 tools/carry_content.py --check` | **40 files, 0 pending**, jar sha1 `4a774506…` (`sdk-carry-check.log`) |
-| Skills line | `python3 ports/tools/check-skills.py --notes ports/mysticalagriculture` | `Skills line present`, **SKILLS GATE: PASS** |
+| Package (twice, `rm -f Cargo.lock` before each) | `cargo horizon-mod build` | `target/horizon-mod/mysticalagriculture.hmod`, EXIT 0, the two archives **`cmp`-identical** (`sdk-build-1/2.log`) |
+| Registry check | `cargo horizon-mod check mysticalagriculture.hmod` | `mysticalagriculture 0.2.1 (native-mod, format native-1/0a875da…/e59da90…, for 26.3)`, **30,400 B**, sha256 `bdb1fb31…38d1`, **EXIT 0** (`sdk-check.log`) |
+| Registry check, JSON | `cargo horizon-mod check … --json` | `{"ok":true,"report":{… "version":"0.2.1","size":30400,"sha256":"bdb1fb31…38d1"}}`, EXIT 0 (`sdk-check-json.log`) |
+| Fits the pinned build | `cargo horizon-mod fits … --build 0a875da` | sha256 `bdb1fb31…38d1` printed, then `0a875da  made for`, EXIT 0 (`sdk-fits.log`) |
+| Fits the previous build | `cargo horizon-mod fits … --build 0b14f8a` | sha256 `bdb1fb31…38d1` printed, then `0b14f8a  fits`, EXIT 0 (`sdk-fits-other.log`) |
+| Package gate | `python3 ports/tools/verify-sdk-package.py mysticalagriculture` | **1/1**, 8 checks (`runtime.rs` byte-identical `555e6442…f6b9`, 49 entries, no `Cargo.lock`) |
+| `runtime.rs` untouched | `unzip -p …hmod src/runtime.rs \| sha256sum` | `555e6442…f6b9` = the retired file, byte for byte |
+| Carried content | `python3 tools/carry_content.py --check` | **40 files, 0 pending**, jar sha1 `4a774506…` |
+| Data dialect | `python3 tools/data_shape.py --data data` | red 6 problems before, **green** after (`loot-red.log`, `loot-green.log`) |
+| In-game, native leg | `tools/e2e.sh` (launcher game) | `PASS` + `EXIT:0` (`e2e-default.log`) |
+| In-game, native selftest | `SELFTEST=1 tools/e2e.sh` | `FAIL: the age-7 crop dropped 1 essence (selftest expects 0)` + `EXIT:1` |
+| In-game, carried table | `TABLE=1 tools/e2e.sh` | `PASS` + `EXIT:0` (`e2e-table.log`) |
+| In-game, table selftest | `TABLE=1 SELFTEST=1 tools/e2e.sh` | `FAIL: … (selftest expects 0)` + `EXIT:1` |
+| e2e logs | `python3 ports/tools/check-e2e-logs.py mysticalagriculture-e2e --strict` | 5 logs, **5 ok**, exit 0 |
+| Skills line | `python3 ports/tools/check-skills.py --notes ports/mysticalagriculture --strict` | `Skills line present`, **SKILLS GATE: PASS** |
 
 The package's 49 entries: `horizon-mod.toml`, `Cargo.toml`, `LICENSE`,
 `LICENSE-NOTICE.md`, `README.md`, `src/{lib,runtime,support}.rs`, `uses.json`
 and the 40 carried content files. No `Cargo.lock` is packed.
+
+### The 0.2.0 rows (superseded, kept as the migration's record)
+
+Pin `0b14f8a`, artifact 30,169 B sha256 `0d6c7606…caee`, 49 entries; `check`
+naming `native-1/0b14f8a…` and `fits --build nightly` → `0b14f8a made for`. The
+1.21.1-spelled loot table travelled in it (see §Slice 2 for the in-game
+measurement of those bytes).
+
+The 0.2.1 `check --json` (`sdk-check-json.log`) reports
+`{"ok":true,"report":{"api":"native-1/0a875da…/e59da90…","game":"26.3",
+"id":"mysticalagriculture","kind":"native-mod","sha256":"bdb1fb31…38d1",
+"size":30400,"version":"0.2.1"}}` — the tool at this pin has no `--uses` flag;
+the package's own `uses.json` is written by `build`.
 
 ### The 0.1.0 in-game evidence (still the behaviour's proof)
 
@@ -335,7 +512,7 @@ young crop) exits 1 and `SELFTEST=1` exits 1 on the ripe-crop assertion.
   scan true, so random ticks never dry/revert the plot; `random_tick_speed 400`
   reaches age 7 in ~100 ticks at render distance 4.
 
-Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices (loaded; slice 2 changed no Rust: the fix is carried data + the harness)
 
 ## Review repairs (PR #570)
 

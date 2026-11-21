@@ -4,10 +4,12 @@
 # content (the crop, its seeds, essence and ingots, their models, textures, recipes, loot).
 id = "mysticalagriculture"
 name = "Mystical Agriculture"
-# 0.2.0 is the SDK-format version. It supersedes the retired `.hnmod` 0.1.0 (PR #886,
-# closed by the 2026-11-18 format purge because Horizon retired `.hnmod`); the registry
-# entry, the file name and the release must agree.
-version = "0.2.0"
+# 0.2.1 is the slice-2 patch: the carried crop table now uses 26.3's loot dialect
+# (singular `condition` + `match_block`, no `bonus_rolls`, integral `rolls`), which the
+# 1.21.1 array form made drop nothing; the package is re-pinned to the campaign's
+# 0a875da Nightly. 0.2.0 was the SDK-format version that superseded the retired
+# `.hnmod` 0.1.0 (PR #886); the registry entry, the file name and the release must agree.
+version = "0.2.1"
 description = """A port of Mystical Agriculture for Horizon: the inferium crop and the essence loop
 around it. Inferium seeds plant mysticalagriculture:inferium_crop on farmland, it grows through
 the wheat template's ages 0..7 on random ticks, and a harvest drops the jar's own essence and
@@ -36,5 +38,5 @@ capabilities = ["registries"]
 
 [native]
 game = "26.3"
-horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+horizon = "0a875da91dbb0fdcb7ba8c42c11341aa229af51a"
 mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
